@@ -632,6 +632,10 @@ body.dark .ausencia-warn-card{background:#2A1E0A;border-color:#5A3A0A;}
     <div id="weekTitle" class="week-title"></div>
     <button class="week-nav-btn" onclick="cambiarSemana(1)">›</button>
   </div>
+  <div style="padding:0 16px 6px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+    <span style="font-size:11px;color:var(--muted);font-style:italic;">💡 Tocá 2 veces un día para agregar turno</span>
+    <button id="btnNotifAgenda" onclick="solicitarPermisosNotificaciones()" style="background:var(--blush);border:1.5px solid var(--rose-l);color:var(--rose-d);border-radius:20px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:5px;flex-shrink:0;">🔔 Notificaciones</button>
+  </div>
   <div class="agenda-swipe" id="agendaSwipe">
     <div class="agenda-week" id="weekStrip"></div>
   </div>
@@ -639,7 +643,9 @@ body.dark .ausencia-warn-card{background:#2A1E0A;border-color:#5A3A0A;}
   <div id="listaEsperaSection"></div>
   <p class="section-title" id="agendaTitle">📅 Turnos</p>
   <div id="listaTurnos"></div>
-  <div style="padding:0 16px 16px"><button class="btn btn-rose" onclick="abrirModal(-1)">+ Nuevo turno</button></div>
+  <div style="padding:0 16px 16px;">
+    <button class="btn btn-rose" onclick="abrirModal(-1)">+ Nuevo turno</button>
+  </div>
 </div>
 
 <!-- SERVICIOS -->
@@ -853,7 +859,7 @@ body.dark .ausencia-warn-card{background:#2A1E0A;border-color:#5A3A0A;}
   <div class="modal-sheet">
     <button class="modal-close" onclick="cerrarModal()">✕</button>
     <div class="modal-title" id="modalTitulo">💅 Nuevo Turno</div>
-    <div class="input-group"><label>Fecha</label><input type="date" id="tFecha" onchange="actualizarPillsPorFecha();clearInputError('tFecha')"><div class="input-error-msg" id="tFechaError">⚠️ Seleccioná una fecha</div></div>
+    <div class="input-group"><label>Fecha</label><input type="date" id="tFecha" onchange="actualizarPillsPorFecha();clearInputError('tFecha');_actualizarTituloModal()"><div class="input-error-msg" id="tFechaError">⚠️ Seleccioná una fecha</div></div>
     <div class="input-group">
       <label>Hora</label>
       <div id="horaPickerWrap">
@@ -1573,18 +1579,19 @@ function cambiarSemana(d){
 function renderSemana(animDir){
   var strip=gs("weekStrip");
   var hoyStr=hoy();
-  var fin=new Date(semanaBase);fin.setDate(fin.getDate()+6);
-  var tit=semanaBase.getDate()+" "+NM_CORTO[semanaBase.getMonth()];
+  // Usar año/mes/dia directos para evitar bug de timezone en primer día
+  var sbY=semanaBase.getFullYear(),sbM=semanaBase.getMonth(),sbD=semanaBase.getDate();
+  var fin=new Date(sbY,sbM,sbD+6);
+  var tit=sbD+" "+NM_CORTO[sbM];
   tit+=" — "+fin.getDate()+" "+NM_CORTO[fin.getMonth()]+" "+fin.getFullYear();
   gs("weekTitle").textContent=tit;
 
   // Build new content
   var html="";
   for(var i=0;i<7;i++){
-    var d=new Date(semanaBase);
-    d.setDate(d.getDate()+i);
+    var d=new Date(sbY,sbM,sbD+i);
     var key=d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
-    var delDia=turnos.filter(function(t){return t.fecha===key&&!t.realizado;});
+    var delDia=turnos.filter(function(t){return t.fecha===key;});
     var isHoy=key===hoyStr;
     var isSel=key===diaSelected;
     var cls="dia-row"+(isHoy?" hoy":"")+(isSel?" selected":"");
@@ -1658,12 +1665,20 @@ function renderSemana(animDir){
 }());
 
 function selDia(k){
+  if(diaSelected===k){
+    // Segundo tap en el mismo día → abrir modal de nuevo turno
+    abrirModal(-1);
+    return;
+  }
   diaSelected=k;
-  var kDate=new Date(k);kDate.setHours(0,0,0,0);
-  var finSem=new Date(semanaBase);finSem.setDate(finSem.getDate()+6);
+  var fp=k.split("-");
+  var kDate=new Date(parseInt(fp[0]),parseInt(fp[1])-1,parseInt(fp[2]));
+  var sbY=semanaBase.getFullYear(),sbM=semanaBase.getMonth(),sbD=semanaBase.getDate();
+  var finSem=new Date(sbY,sbM,sbD+6);
   if(kDate<semanaBase||kDate>finSem){
     var dow=kDate.getDay();var diff=dow===0?-6:1-dow;
-    semanaBase=new Date(kDate);semanaBase.setDate(semanaBase.getDate()+diff);
+    var kY=kDate.getFullYear(),kM=kDate.getMonth(),kDd=kDate.getDate();
+    semanaBase=new Date(kY,kM,kDd+diff);
   }
   renderSemana(0);
   renderTurnos();
@@ -2216,9 +2231,158 @@ function wsppEspera(fecha,idx){
   window.open("https://wa.me/54"+tel+"?text="+encodeURIComponent(msg),"_blank");
 }
 
+function abrirTurnoPasado(){
+  abrirModal(-1);
+  // Marcar el modal como "turno pasado" — se guardará como ya realizado
+  gs("modalTitulo").textContent="📋 Turno ya realizado";
+  gs("btnGuardar").textContent="Registrar turno pasado 📋";
+  gs("btnGuardar").onclick=function(){ guardarTurnoPasado(); };
+  // Permitir cambiar fecha libremente
+}
+
+function guardarTurnoPasado(){
+  var f=gs("tFecha").value,n=gs("tNombre").value.trim();
+  clearInputError("tFecha"); clearInputError("tNombre");
+  var hayError=false;
+  if(!f){ showFieldError("tFecha","tFechaError"); hayError=true; }
+  if(!n){ showFieldError("tNombre","tNombreError"); hayError=true; }
+  if(hayError) return;
+  var s=gs("tServicio").value;
+  var base=parseFloat(gs("tPrecio").value)||0;
+  var se=parseFloat(gs("tSenia").value)||0;
+  var extras=getExtrasData("t");
+  var exTotal=extras.reduce(function(a,e){return a+e.precio*e.cant;},0);
+  var precio=base+exTotal;
+  var hora=getHora24();
+  // Lo creamos directo como realizado
+  var obj={fecha:f,hora:hora,nombre:n,servicio:s,precio:precio,senia:se,extras:extras,realizado:true};
+  turnos.push(obj);
+  // También sumar a historial/ganancia
+  ganancia+=precio;
+  var fpArr=f.split("-");
+  historial.push({fecha:f+" "+hora,servicio:s,nombre:n,precio:precio,costo:0,ganancia:precio,extras:extras,senia:se});
+  if(!Array.isArray(clientas)) clientas=[];
+  var nLow=n.toLowerCase();
+  if(!clientas.some(function(c){return c.nombre&&c.nombre.trim().toLowerCase()===nLow;})){
+    clientas.push({nombre:n,telefono:"",notas:"",recordatorio:1,creada:hoy()});
+  }
+  lsSave("turnos",turnos);lsSave("clientas",clientas);
+  guardar();mostrar();renderSemana();renderTurnos();renderHistorial();renderStats();
+  cerrarModal();
+  gs("btnGuardar").onclick=function(){ guardarTurno(); };
+  showToast("📋 Turno pasado registrado: "+n);
+}
+
 function checkNotifDot(){
   gs("notifDot").style.display=turnos.some(function(t){return t.fecha===hoy()&&!t.realizado;})?"block":"none";
 }
+
+// ─── NOTIFICACIONES PUSH ────────────────────────────────────
+var _notifPermiso=false;
+var _notifInterval=null;
+var _notifDisparadas={};
+
+function solicitarPermisosNotificaciones(){
+  if(!("Notification" in window)){
+    showToast("❌ Este navegador no soporta notificaciones");
+    return;
+  }
+  if(Notification.permission==="granted"){
+    _notifPermiso=true;
+    activarNotificaciones();
+    showToast("🔔 Notificaciones ya activas!");
+    return;
+  }
+  Notification.requestPermission().then(function(perm){
+    if(perm==="granted"){
+      _notifPermiso=true;
+      activarNotificaciones();
+      showToast("🔔 Notificaciones activadas!");
+    } else {
+      showToast("❌ Permiso denegado. Habilitá las notificaciones en la config del navegador.");
+    }
+  });
+}
+
+function activarNotificaciones(){
+  if(_notifInterval) clearInterval(_notifInterval);
+  // Chequear cada minuto
+  _notifInterval=setInterval(chequearTurnosProximos,60000);
+  // También al activar, chequear ya
+  chequearTurnosProximos();
+  lsSaveLocal("notifActivas","1");
+  // Actualizar botón
+  var btn=gs("btnNotifAgenda");
+  if(btn){
+    btn.textContent="🔔 Notificaciones activas";
+    btn.style.background="var(--success)";
+    btn.style.color="white";
+    btn.style.borderColor="var(--success)";
+  }
+}
+
+function chequearTurnosProximos(){
+  if(!_notifPermiso&&Notification.permission!=="granted") return;
+  var ahora=new Date();
+  var hoyStr=hoy();
+  var turnos=lsParseLocal("turnos")||[];
+  turnos.forEach(function(t){
+    if(t.realizado||t.ausente) return;
+    if(t.fecha!==hoyStr) return;
+    if(!t.hora) return;
+    var partes=t.hora.split(":");
+    var tHora=new Date();
+    tHora.setHours(parseInt(partes[0]),parseInt(partes[1]),0,0);
+    var diff=tHora-ahora; // ms
+    var diffMin=diff/60000;
+    // Notificar 30 minutos antes (ventana: entre 32 y 28 min)
+    var key30=t.fecha+"_"+t.hora+"_30";
+    if(diffMin>0&&diffMin<=32&&diffMin>=28&&!_notifDisparadas[key30]){
+      _notifDisparadas[key30]=true;
+      dispararNotif("⏰ Turno en 30 min","👩 "+t.nombre+" · "+t.servicio+" a las "+fmtHora(t.hora));
+    }
+    // Notificar 10 minutos antes (ventana: entre 12 y 8 min)
+    var key10=t.fecha+"_"+t.hora+"_10";
+    if(diffMin>0&&diffMin<=12&&diffMin>=8&&!_notifDisparadas[key10]){
+      _notifDisparadas[key10]=true;
+      dispararNotif("🚨 Turno en 10 min","👩 "+t.nombre+" · "+t.servicio+" a las "+fmtHora(t.hora));
+    }
+    // Notificar a la hora exacta (ventana: entre +2 y -2 min)
+    var key0=t.fecha+"_"+t.hora+"_0";
+    if(diffMin>=-2&&diffMin<=2&&!_notifDisparadas[key0]){
+      _notifDisparadas[key0]=true;
+      dispararNotif("💅 ¡Es la hora del turno!","👩 "+t.nombre+" · "+t.servicio);
+    }
+  });
+}
+
+function dispararNotif(titulo,cuerpo){
+  try{
+    var notif=new Notification(titulo,{
+      body:cuerpo,
+      icon:"icon-192.png",
+      badge:"icon-192.png",
+      vibrate:[200,100,200]
+    });
+    notif.onclick=function(){
+      window.focus();
+      notif.close();
+      showTab("agenda");
+    };
+    setTimeout(function(){notif.close();},8000);
+  }catch(e){}
+}
+
+// Restaurar notificaciones al cargar si estaban activas
+function initNotificaciones(){
+  if(lsParseLocal("notifActivas")==="1"||lsParseLocal("notifActivas")===1){
+    if(Notification.permission==="granted"){
+      _notifPermiso=true;
+      activarNotificaciones();
+    }
+  }
+}
+
 
 // ─── MODAL ───────────────────────────────────────────────
 var _editIdx=-1;
@@ -2264,6 +2428,16 @@ function cerrarModal(){
   gs("modalTurno").classList.remove("show");
   ocultarSugerencias();
 }
+
+function _actualizarTituloModal(){
+  if(_editIdx>=0) return; // Editando → no cambiar título
+  var f=gs("tFecha").value;
+  if(!f) return;
+  var esPasado = f < hoy();
+  gs("modalTitulo").textContent = esPasado ? "📋 Turno pasado" : "💅 Nuevo Turno";
+  gs("btnGuardar").textContent  = esPasado ? "Registrar turno pasado 📋" : "Guardar turno 📅";
+}
+
 
 function actualizarContadorNombre(){
   var inp=gs("tNombre");
@@ -2367,12 +2541,12 @@ function showFieldError(inputId,errId){
 
 function guardarTurno(forzar){
   var f=gs("tFecha").value,n=gs("tNombre").value.trim();
-  // Limpiar errores previos
   clearInputError("tFecha"); clearInputError("tNombre");
   var hayError=false;
   if(!f){ showFieldError("tFecha","tFechaError"); hayError=true; }
   if(!n){ showFieldError("tNombre","tNombreError"); hayError=true; }
   if(hayError) return;
+
   var s=gs("tServicio").value;
   var base=parseFloat(gs("tPrecio").value)||0;
   var se=parseFloat(gs("tSenia").value)||0;
@@ -2380,42 +2554,59 @@ function guardarTurno(forzar){
   var exTotal=extras.reduce(function(a,e){return a+e.precio*e.cant;},0);
   var precio=base+exTotal;
   var hora=getHora24();
-  var obj={fecha:f,hora:hora,nombre:n,servicio:s,precio:precio,senia:se,extras:extras,realizado:false};
 
-  // ── Chequeo de turnos superpuestos ──
-  if(!forzar && _editIdx < 0){
-    var conflicto = turnos.find(function(t){
-      return t.fecha === f && t.hora === hora && !t.realizado;
-    });
-    if(conflicto){
-      // Mostrar modal de advertencia
-      gs("solapNombre").textContent = conflicto.nombre;
-      gs("solapHora").textContent = fmtHora(hora) + " · " + f.split("-").reverse().join("/");
-      gs("solapServicio").textContent = conflicto.servicio;
-      gs("modalSolap").classList.add("show");
-      return;
+  // ── Detectar si la fecha es pasada (anterior a hoy) ──
+  var esPasado = f < hoy();
+
+  var obj={fecha:f,hora:hora,nombre:n,servicio:s,precio:precio,senia:se,extras:extras,realizado:esPasado};
+
+  if(esPasado){
+    // Turno pasado: guardar como realizado y sumar al historial/ganancia
+    if(_editIdx>=0){
+      // Si se edita un turno existente, mantener su estado original
+      obj.realizado=turnos[_editIdx].realizado;
+      turnos[_editIdx]=obj;
+      showToast("✅ Turno actualizado!");
+    } else {
+      turnos.push(obj);
+      ganancia+=precio;
+      historial.push({fecha:f+" "+hora,servicio:s,nombre:n,precio:precio,costo:0,ganancia:precio,extras:extras,senia:se});
+      showToast("📋 Turno pasado registrado: "+n);
     }
+  } else {
+    // Turno futuro/hoy: chequeo de superposición
+    if(!forzar && _editIdx < 0){
+      var conflicto = turnos.find(function(t){
+        return t.fecha === f && t.hora === hora && !t.realizado;
+      });
+      if(conflicto){
+        gs("solapNombre").textContent = conflicto.nombre;
+        gs("solapHora").textContent = fmtHora(hora) + " · " + f.split("-").reverse().join("/");
+        gs("solapServicio").textContent = conflicto.servicio;
+        gs("modalSolap").classList.add("show");
+        return;
+      }
+    }
+    if(_editIdx>=0){obj.realizado=turnos[_editIdx].realizado;turnos[_editIdx]=obj;showToast("✅ Turno actualizado!");}
+    else{turnos.push(obj);showToast("📅 Turno agendado: "+n);}
   }
 
-  if(_editIdx>=0){obj.realizado=turnos[_editIdx].realizado;turnos[_editIdx]=obj;showToast("✅ Turno actualizado!");}
-  else{turnos.push(obj);showToast("📅 Turno agendado: "+n);}
-  // Ir a la semana del turno agendado
+  // Ir a la semana del turno
   var fp=f.split("-");
-  var kDate=new Date(parseInt(fp[0]),parseInt(fp[1])-1,parseInt(fp[2]));kDate.setHours(0,0,0,0);
+  var kDate=new Date(parseInt(fp[0]),parseInt(fp[1])-1,parseInt(fp[2]));
   var dow=kDate.getDay();var diff=dow===0?-6:1-dow;
-  semanaBase=new Date(kDate);semanaBase.setDate(semanaBase.getDate()+diff);
+  semanaBase=new Date(parseInt(fp[0]),parseInt(fp[1])-1,parseInt(fp[2])+diff);
+
   // Agregar clienta si no existe
   if(!Array.isArray(clientas)) clientas=[];
   var nLow=n.toLowerCase();
-  var yaExiste=clientas.some(function(c){return c.nombre&&c.nombre.trim().toLowerCase()===nLow;});
-  if(!yaExiste){
+  if(!clientas.some(function(c){return c.nombre&&c.nombre.trim().toLowerCase()===nLow;})){
     clientas.push({nombre:n,telefono:"",notas:"",recordatorio:1,creada:hoy()});
   }
-  // Guardar todo junto
   lsSave("turnos",turnos);
   lsSave("clientas",clientas);
   guardar();
-  mostrar();renderSemana();renderTurnos();cerrarModal();
+  mostrar();renderSemana();renderTurnos();renderHistorial();renderStats();cerrarModal();
 }
 
 function marcarRealizado(i){
@@ -3734,15 +3925,21 @@ function pwaCerrarBanner(){
   </div>
 </div>
 <!-- MODAL ELIMINAR CLIENTA -->
-<div class="modal-overlay" id="modalEliminarClienta">
-  <div class="modal-sheet" style="text-align:center;padding-bottom:32px;">
-    <div style="font-size:48px;margin-bottom:10px;">🗑</div>
-    <div style="font-size:18px;font-weight:900;margin-bottom:8px;">¿Eliminar clienta?</div>
-    <div style="font-size:14px;color:var(--muted);margin-bottom:6px;"><strong id="eliminarClientaNombre"></strong></div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:24px;">Esta acción no se puede deshacer.</div>
-    <div style="display:flex;gap:10px;">
-      <button onclick="gs('modalEliminarClienta').classList.remove('show')" style="flex:1;padding:14px;background:var(--blush);color:var(--text);border:none;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;">Cancelar</button>
-      <button onclick="ejecutarEliminarClienta()" style="flex:1;padding:14px;background:var(--danger);color:white;border:none;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;">Sí, eliminar</button>
+<div class="modal-overlay" id="modalEliminarClienta" style="backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);">
+  <div style="background:var(--card);border-radius:28px;padding:32px 26px 28px;width:calc(100% - 48px);max-width:320px;text-align:center;box-shadow:0 24px 60px rgba(0,0,0,0.28);animation:elimPopIn 0.35s cubic-bezier(.34,1.56,.64,1);">
+    <!-- Ícono con fondo degradado -->
+    <div style="width:72px;height:72px;border-radius:50%;background:linear-gradient(135deg,#FDDADA,#F5B8B8);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:32px;box-shadow:0 4px 16px rgba(217,85,85,0.25);">🗑️</div>
+    <!-- Título -->
+    <div style="font-size:20px;font-weight:900;color:var(--text);margin-bottom:6px;">¿Eliminás a</div>
+    <div style="font-size:18px;font-weight:900;color:var(--rose);margin-bottom:10px;" id="eliminarClientaNombre"></div>
+    <!-- Aviso -->
+    <div style="font-size:12px;color:var(--muted);background:var(--blush);border-radius:10px;padding:9px 14px;margin-bottom:26px;line-height:1.5;">
+      ⚠️ Se borrarán sus datos permanentemente.<br>Esta acción no se puede deshacer.
+    </div>
+    <!-- Botones -->
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <button onclick="ejecutarEliminarClienta()" style="padding:15px;background:linear-gradient(135deg,#D95555,#C03030);color:white;border:none;border-radius:16px;font-size:15px;font-weight:800;cursor:pointer;box-shadow:0 4px 16px rgba(217,85,85,0.35);letter-spacing:0.2px;">🗑️ Sí, eliminar</button>
+      <button onclick="gs('modalEliminarClienta').classList.remove('show')" style="padding:13px;background:var(--blush);color:var(--muted);border:none;border-radius:16px;font-size:14px;font-weight:700;cursor:pointer;">Cancelar</button>
     </div>
   </div>
 </div>
@@ -3986,6 +4183,18 @@ document.addEventListener("DOMContentLoaded", function(){
   pinInit();
   // Conectar Firebase automáticamente con la URL pre-configurada
   fbInit(_FB_DB_URL);
+  // Inicializar notificaciones si estaban activas
+  initNotificaciones();
+  // Actualizar estado del botón de notificaciones
+  setTimeout(function(){
+    var btn=gs("btnNotifAgenda");
+    if(btn&&Notification.permission==="granted"){
+      btn.textContent="🔔 Notificaciones activas";
+      btn.style.background="var(--success)";
+      btn.style.color="white";
+      btn.style.borderColor="var(--success)";
+    }
+  },500);
 });
 </script>
 

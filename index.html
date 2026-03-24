@@ -551,7 +551,7 @@ body.dark .ausencia-warn-card{background:#2A1E0A;border-color:#5A3A0A;}
 <body>
 
 <!-- PIN DE SEGURIDAD -->
-<div id="pinOverlay">
+<div id="pinOverlay" style="display:none;">
   <div class="pin-emoji">💅</div>
   <div class="pin-title" id="pinTitle">Nail Studio</div>
   <div class="pin-sub" id="pinSubtitle">Ingresá tu PIN</div>
@@ -1132,36 +1132,52 @@ window.addEventListener("offline", function(){
   showToast("📵 Sin internet · los datos se guardan localmente");
 });
 
-// Sincronización en tiempo real usando SSE de Firebase
+// Sincronización en tiempo real — polling cada 5 segundos + SSE
 var _sseConn = null;
+var _pollTimer = null;
+var _lastRemoteStr = "";
+
 function fbListenAll(){
   if(!_FB_READY) return;
-  if(_sseConn){ _sseConn.close(); }
+  // SSE para cambios instantáneos
   try {
+    if(_sseConn){ _sseConn.close(); }
     _sseConn = new EventSource(_FB_DB_URL + "/datos.json?accept=text/event-stream");
     _sseConn.addEventListener("put", function(e){
       try {
         var msg = JSON.parse(e.data);
-        if(msg && msg.data){
-          _remoteData = msg.data;
-          aplicarDatosRemotos(_remoteData);
-        }
+        if(msg && msg.data){ _remoteData = msg.data; aplicarDatosRemotos(_remoteData); }
       } catch(err){}
     });
     _sseConn.addEventListener("patch", function(e){
       try {
         var msg = JSON.parse(e.data);
-        if(msg && msg.data){
-          Object.assign(_remoteData, msg.data);
-          aplicarDatosRemotos(_remoteData);
-        }
+        if(msg && msg.data){ Object.assign(_remoteData, msg.data); aplicarDatosRemotos(_remoteData); }
       } catch(err){}
     });
-    _sseConn.onerror = function(){
-      // Reconectar en 5s si hay error
-      setTimeout(function(){ fbListenAll(); }, 5000);
-    };
+    _sseConn.onerror = function(){ _sseConn.close(); };
   } catch(err){}
+  // Polling cada 5s como respaldo garantizado
+  _startPolling();
+}
+
+function _startPolling(){
+  if(_pollTimer) clearInterval(_pollTimer);
+  _pollTimer = setInterval(function(){
+    if(!_FB_READY) return;
+    fetch(_FB_DB_URL + "/datos.json")
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        if(!data) return;
+        var remStr = JSON.stringify(data);
+        if(remStr !== _lastRemoteStr){
+          _lastRemoteStr = remStr;
+          _remoteData = data;
+          aplicarDatosRemotos(data);
+        }
+      })
+      .catch(function(){});
+  }, 5000);
 }
 
 function aplicarDatosRemotos(data){
@@ -3833,18 +3849,9 @@ async function _migrarPinLegacy(){
 }
 
 function pinInit(){
-  _migrarPinLegacy().then(function(){
-    var pin = _getPin();
-    if(!pin){
-      _pinModo = "configurar";
-      document.getElementById("pinSubtitle").textContent = "Creá tu PIN de 4 dígitos";
-      document.getElementById("pinTitle").textContent = "Bienvenida 💅";
-    } else {
-      _pinModo = "verificar";
-      document.getElementById("pinSubtitle").textContent = "Ingresá tu PIN";
-      document.getElementById("pinChangeLink").style.display = "block";
-    }
-  });
+  // PIN desactivado — la app abre directo
+  var overlay = document.getElementById("pinOverlay");
+  if(overlay){ overlay.style.display = "none"; }
 }
 
 function pinPress(d){

@@ -173,7 +173,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 
 /* TURNOS */
 .turno-card{background:var(--card);border-radius:16px;padding:16px;box-shadow:var(--shadow);margin:0 16px 10px;border-left:4px solid var(--rose-l);}
-.turno-card.realizado{border-left-color:var(--success);opacity:0.6;}
+.turno-card.realizado{border-left-color:var(--success);background:linear-gradient(135deg,#EDF7F1,#D4F0E2);opacity:1;}
+.turno-card.realizado .turno-nombre{color:#1A5C38;}
+.turno-card.realizado .turno-precio{color:#1A8A50;}
+.turno-card.realizado .turno-chip{color:#3A7A58;}
+body.dark .turno-card.realizado{background:linear-gradient(135deg,#0D2A1A,#0A3020);}
+body.dark .turno-card.realizado .turno-nombre{color:#7EC89A;}
+body.dark .turno-card.realizado .turno-precio{color:#5BAD7F;}
+/* Pill verde en la semana para días con turnos realizados */
+.dia-turno-pill.realizado{background:#D4F0E2;color:#1A6B40;}
+body.dark .dia-turno-pill.realizado{background:#0A2A14;color:#7EC89A;}
 .turno-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;}
 .turno-nombre{font-size:15px;font-weight:700;}
 .turno-precio{font-size:15px;font-weight:800;color:var(--rose);}
@@ -1610,7 +1619,9 @@ function renderSemana(animDir){
       contenidoInner='<span class="dia-empty">Sin turnos</span>';
     } else {
       delDia.slice(0,2).forEach(function(t){
-        contenidoInner+='<span class="dia-turno-pill">⏰ '+fmtHora(t.hora)+'  '+t.nombre+'</span>';
+        var pillCls="dia-turno-pill"+(t.realizado?" realizado":"");
+        var icono=t.realizado?"✅":"⏰";
+        contenidoInner+='<span class="'+pillCls+'">'+icono+' '+fmtHora(t.hora)+'  '+t.nombre+'</span>';
       });
       if(delDia.length>2){
         contenidoInner+='<span class="dia-turno-pill">+' +(delDia.length-2)+' más</span>';
@@ -2606,6 +2617,7 @@ function guardarTurno(forzar){
   lsSave("turnos",turnos);
   lsSave("clientas",clientas);
   guardar();
+  sincronizarTurnosSW();
   mostrar();renderSemana();renderTurnos();renderHistorial();renderStats();cerrarModal();
 }
 
@@ -4181,11 +4193,9 @@ function desactivarPin(){
 // Iniciar PIN al cargar + Firebase automático
 document.addEventListener("DOMContentLoaded", function(){
   pinInit();
-  // Conectar Firebase automáticamente con la URL pre-configurada
   fbInit(_FB_DB_URL);
-  // Inicializar notificaciones si estaban activas
   initNotificaciones();
-  // Actualizar estado del botón de notificaciones
+  registrarServiceWorker();
   setTimeout(function(){
     var btn=gs("btnNotifAgenda");
     if(btn&&Notification.permission==="granted"){
@@ -4196,6 +4206,63 @@ document.addEventListener("DOMContentLoaded", function(){
     }
   },500);
 });
+
+// ── SERVICE WORKER + NOTIFICACIÓN DIARIA ─────────────────
+var _swReg = null;
+
+function registrarServiceWorker(){
+  if(!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("./sw.js").then(function(reg){
+    _swReg = reg;
+    // Escuchar mensajes del SW (cuando pide turnos con la app cerrada)
+    navigator.serviceWorker.addEventListener("message", function(e){
+      if(e.data && e.data.type === "DAME_TURNOS"){
+        var t = lsParseLocal("turnos") || [];
+        e.ports[0].postMessage({turnos: t});
+      }
+    });
+    // Sincronizar turnos al SW cada vez que la app carga
+    sincronizarTurnosSW();
+    // Registrar Periodic Background Sync si está disponible
+    if("periodicSync" in reg){
+      Notification.requestPermission().then(function(perm){
+        if(perm !== "granted") return;
+        reg.periodicSync.register("turnos-manana", {
+          minInterval: 12 * 60 * 60 * 1000 // cada 12 horas
+        }).catch(function(){});
+      });
+    }
+    // Programar notificación manual a las 20:00 de cada día como fallback
+    programarNotifDiaria();
+  }).catch(function(){});
+}
+
+function sincronizarTurnosSW(){
+  if(!_swReg || !_swReg.active) return;
+  var t = lsParseLocal("turnos") || [];
+  _swReg.active.postMessage({type:"SYNC_TURNOS", turnos: t});
+}
+
+function programarNotifDiaria(){
+  // Calcular ms hasta las 20:00 de hoy (o mañana si ya pasó)
+  var ahora = new Date();
+  var objetivo = new Date();
+  objetivo.setHours(20, 0, 0, 0);
+  if(ahora >= objetivo) objetivo.setDate(objetivo.getDate() + 1);
+  var ms = objetivo - ahora;
+  setTimeout(function(){
+    dispararNotifManana();
+    // Repetir cada 24 horas
+    setInterval(dispararNotifManana, 24 * 60 * 60 * 1000);
+  }, ms);
+}
+
+function dispararNotifManana(){
+  sincronizarTurnosSW();
+  if(_swReg && _swReg.active){
+    _swReg.active.postMessage({type:"CHECK_MANANA"});
+  }
+}
 </script>
 
 </body>

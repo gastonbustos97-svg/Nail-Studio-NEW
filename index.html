@@ -196,6 +196,12 @@ body.dark .dia-turno-pill.realizado{background:#0A2A14;color:#7EC89A;}
 .btn-edit-t{background:#F3EAF5;color:var(--mauve);border:none;border-radius:8px;padding:9px 12px;font-size:14px;cursor:pointer;}
 .btn-eliminar-t{background:#FDEAEA;color:var(--danger);border:none;border-radius:8px;padding:9px 12px;font-size:12px;font-weight:700;cursor:pointer;}
 .turno-card.realizado .btn-realizado{background:#bbb;pointer-events:none;}
+/* Sin cobro */
+.sincobro-badge{background:#EEE6FF;color:#6B46C1;font-size:11px;font-weight:700;padding:3px 9px;border-radius:20px;}
+body.dark .sincobro-badge{background:#2A1A44;color:#C4A8FF;}
+.turno-card.sincobro{border-left-color:#9B6B8A;}
+.turno-precio.sincobro-precio{color:var(--muted);text-decoration:line-through;font-size:12px;}
+.history-item.sincobro-hist .history-gain{color:var(--muted);}
 
 /* HORA PICKER */
 .hora-picker{display:flex;align-items:center;gap:10px;background:#FAF7F8;border:1.5px solid #EDE0E5;border-radius:12px;padding:10px 16px;}
@@ -976,6 +982,15 @@ body.dark .ausencia-warn-card{background:#2A1E0A;border-color:#5A3A0A;}
     <div class="input-group">
       <label>Seña 💰 (solo del servicio, sin extras)</label>
       <input type="number" id="tSenia" placeholder="0" readonly style="background:#F5EEF1;color:var(--mauve);font-weight:700;">
+    </div>
+
+    <!-- SIN COBRO -->
+    <div style="display:flex;align-items:center;gap:12px;background:var(--blush);border:1.5px solid var(--rose-l);border-radius:14px;padding:13px 16px;margin-bottom:10px;cursor:pointer;" onclick="toggleSinCobro()">
+      <input type="checkbox" id="tSinCobro" style="width:18px;height:18px;accent-color:#9B6B8A;cursor:pointer;flex-shrink:0;" onclick="event.stopPropagation();toggleSinCobro()">
+      <div>
+        <div style="font-size:13px;font-weight:800;color:var(--text);">🎁 Sin cobro</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px;">Para tu novia, garantías, cortesías… Se registra el servicio pero <strong>no suma al total</strong>.</div>
+      </div>
     </div>
 
     <button class="btn btn-rose" id="btnGuardar" onclick="guardarTurno()">Guardar turno 📅</button>
@@ -1877,10 +1892,12 @@ function renderHistorial(){
   // Resumen del mes
   if(resumen){
     if(delMes.length){
-      var totalMes=delMes.reduce(function(s,h){return s+(h.ganancia||0);},0);
+      var totalMes=delMes.reduce(function(s,h){return s+(h.sinCobro?0:(h.ganancia||0));},0);
+      var sinCobroCount=delMes.filter(function(h){return h.sinCobro;}).length;
+      var scExtra=sinCobroCount?' <span style="font-size:11px;color:#9B6B8A;font-weight:700;">+'+sinCobroCount+' sin cobro</span>':'';
       resumen.innerHTML=
         '<span style="font-size:13px;color:var(--muted)">'+delMes.length+' servicio'+(delMes.length>1?"s":"")+'</span>'+
-        '<span style="font-size:16px;font-weight:800;color:var(--success)">+'+fmt(totalMes)+'</span>';
+        '<span style="font-size:16px;font-weight:800;color:var(--success)">+'+fmt(totalMes)+scExtra+'</span>';
       resumen.style.display="flex";
     } else {
       resumen.style.display="none";
@@ -1905,16 +1922,20 @@ function renderHistorial(){
       var fp=fDisplay.split(" ");var dp=fp[0].split("-");
       fDisplay=dp[2]+"/"+dp[1]+"/"+dp[0]+(fp[1]?" "+fp[1]:"");
     }
+    var scBadge=s.sinCobro?'<span class="sincobro-badge" style="font-size:10px;padding:2px 7px;">🎁 Sin cobro</span>':'';
+    var gainHtml=s.sinCobro
+      ?'<div style="font-size:13px;font-weight:700;color:var(--muted);text-decoration:line-through;">'+fmt(s.precio||0)+'</div><div style="font-size:10px;color:var(--muted);">Sin cobro</div>'
+      :'<div class="history-gain">+'+fmt(s.ganancia)+'</div>';
     el.innerHTML+=
-      '<div class="history-item">'+
+      '<div class="history-item'+(s.sinCobro?' sincobro-hist':'')+'">'+
         '<div style="flex:1;min-width:0">'+
-          '<div class="history-date">'+fDisplay+'</div>'+
+          '<div class="history-date">'+fDisplay+' '+scBadge+'</div>'+
           '<div class="history-svc">'+s.servicio+cn+'</div>'+
           exStr+
           '<div style="font-size:11px;color:var(--muted)">Materiales: '+fmt(s.costo||0)+'</div>'+
         '</div>'+
         '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;margin-left:10px;flex-shrink:0">'+
-          '<div class="history-gain">+'+fmt(s.ganancia)+'</div>'+
+          gainHtml+
           '<button class="btn-delete" onclick="borrarServicio('+i+')">🗑️</button>'+
         '</div>'+
       '</div>';
@@ -2292,6 +2313,10 @@ function renderTurnos(){
           ? '<span class="senia-pend-badge">💰 Seña pendiente: '+fmt(t.senia)+'</span>'
           : '<span class="senia-badge">💰 Seña: '+fmt(t.senia)+'</span>')
         : '';
+      var sinCobroBadge = t.sinCobro ? '<span class="sincobro-badge">🎁 Sin cobro</span>' : '';
+      var precioDisplay = t.sinCobro
+        ? '<span class="turno-precio sincobro-precio">'+fmt(t.precio||0)+'</span>'
+        : '<span class="turno-precio">'+fmt(t.precio||0)+'</span>';
       var exBdg=(t.extras||[]).map(function(e){return'<span class="turno-extra-badge">'+e.nombre+(e.cant>1?" x"+e.cant:"")+'</span>';}).join("");
       var ausBdg=t.ausente?'<span class="ausencia-badge">😔 Faltó/Canceló</span>':'';
       // Botón WA solo si la clienta tiene teléfono
@@ -2300,9 +2325,9 @@ function renderTurnos(){
       var waBtnTitle = t.ausente ? "💬 Invitar a reagendar" : t.realizado ? "💬 Enviar agradecimiento" : t.senia>0 ? "💬 Pedir seña" : "💬 Recordatorio";
       var waBtn = tieneTel ? '<button class="btn-wsp" onclick="wapiTurno('+idx+')" title="'+waBtnTitle+'">💬</button>' : '';
       el.innerHTML+=
-        '<div class="turno-card'+(t.realizado?" realizado":t.ausente?" ausente":"")+'">'+
-          '<div class="turno-header"><span class="turno-nombre">👩 '+t.nombre+'</span><span class="turno-precio">'+fmt(t.precio||0)+'</span></div>'+
-          '<div class="turno-info"><span class="turno-chip">⏰ '+fmtHora(t.hora)+'</span><span class="turno-svc">'+t.servicio+'</span>'+exBdg+sb+ausBdg+'</div>'+
+        '<div class="turno-card'+(t.realizado?" realizado":t.ausente?" ausente":"")+(t.sinCobro?" sincobro":"")+'">'+
+          '<div class="turno-header"><span class="turno-nombre">👩 '+t.nombre+'</span>'+precioDisplay+'</div>'+
+          '<div class="turno-info"><span class="turno-chip">⏰ '+fmtHora(t.hora)+'</span><span class="turno-svc">'+t.servicio+'</span>'+exBdg+sb+sinCobroBadge+ausBdg+'</div>'+
           '<div class="turno-actions">'+
             (t.realizado
               ?'<button class="btn-realizado" disabled>✓ Realizado</button>'
@@ -2447,13 +2472,14 @@ function guardarTurnoPasado(){
   var exTotal=extras.reduce(function(a,e){return a+e.precio*e.cant;},0);
   var precio=base+exTotal;
   var hora=getHora24();
+  var sinCobro=!!(gs("tSinCobro")&&gs("tSinCobro").checked);
   // Lo creamos directo como realizado
-  var obj={fecha:f,hora:hora,nombre:n,servicio:s,precio:precio,senia:se,extras:extras,realizado:true};
+  var obj={fecha:f,hora:hora,nombre:n,servicio:s,precio:precio,senia:se,extras:extras,realizado:true,sinCobro:sinCobro};
   turnos.push(obj);
-  // También sumar a historial/ganancia
-  ganancia+=precio;
+  // También sumar a historial/ganancia (solo si tiene cobro)
+  if(!sinCobro){ ganancia+=precio; }
   var fpArr=f.split("-");
-  historial.push({fecha:f+" "+hora,servicio:s,nombre:n,precio:precio,costo:0,ganancia:precio,extras:extras,senia:se});
+  historial.push({fecha:f+" "+hora,servicio:s,nombre:n,precio:precio,costo:0,ganancia:sinCobro?0:precio,extras:extras,senia:se,sinCobro:sinCobro});
   if(!Array.isArray(clientas)) clientas=[];
   var nLow=n.toLowerCase();
   if(!clientas.some(function(c){return c.nombre&&c.nombre.trim().toLowerCase()===nLow;})){
@@ -2463,7 +2489,7 @@ function guardarTurnoPasado(){
   guardar();mostrar();renderSemana();renderTurnos();renderHistorial();renderStats();
   cerrarModal();
   gs("btnGuardar").onclick=function(){ guardarTurno(); };
-  showToast("📋 Turno pasado registrado: "+n);
+  showToast(sinCobro?"🎁 Turno sin cobro registrado: "+n:"📋 Turno pasado registrado: "+n);
 }
 
 function checkNotifDot(){
@@ -2596,6 +2622,7 @@ function abrirModal(idx){
     gs("tServicio").selectedIndex=0;
     gs("tPrecio").value=preciosSvc[gs("tServicio").value]||0;
     gs("tSenia").value="";
+    var scChk=gs("tSinCobro");if(scChk)scChk.checked=false;
   } else {
     var t=turnos[idx];
     gs("modalTitulo").textContent="✏️ Editar Turno";
@@ -2613,6 +2640,7 @@ function abrirModal(idx){
       if(e.nombre==="Retirado otro salón"){var el=gs("t_reto");if(el)el.checked=true;}
       if(e.nombre==="Arreglo por uña"){var el=gs("t_arr");if(el)el.checked=true;setUnas("t",e.cant);}
     });
+    var scChk=gs("tSinCobro");if(scChk)scChk.checked=!!t.sinCobro;
   }
   calcTotalTurno();
   gs("modalTurno").classList.add("show");
@@ -2620,6 +2648,11 @@ function abrirModal(idx){
 function cerrarModal(){
   gs("modalTurno").classList.remove("show");
   ocultarSugerencias();
+}
+
+function toggleSinCobro(){
+  var chk = gs("tSinCobro");
+  chk.checked = !chk.checked;
 }
 
 function _actualizarTituloModal(){
@@ -2747,11 +2780,12 @@ function guardarTurno(forzar){
   var exTotal=extras.reduce(function(a,e){return a+e.precio*e.cant;},0);
   var precio=base+exTotal;
   var hora=getHora24();
+  var sinCobro=!!(gs("tSinCobro")&&gs("tSinCobro").checked);
 
   // ── Detectar si la fecha es pasada (anterior a hoy) ──
   var esPasado = f < hoy();
 
-  var obj={fecha:f,hora:hora,nombre:n,servicio:s,precio:precio,senia:se,extras:extras,realizado:esPasado};
+  var obj={fecha:f,hora:hora,nombre:n,servicio:s,precio:precio,senia:se,extras:extras,realizado:esPasado,sinCobro:sinCobro};
 
   if(esPasado){
     // Turno pasado: guardar como realizado y sumar al historial/ganancia
@@ -2762,9 +2796,9 @@ function guardarTurno(forzar){
       showToast("✅ Turno actualizado!");
     } else {
       turnos.push(obj);
-      ganancia+=precio;
-      historial.push({fecha:f+" "+hora,servicio:s,nombre:n,precio:precio,costo:0,ganancia:precio,extras:extras,senia:se});
-      showToast("📋 Turno pasado registrado: "+n);
+      if(!sinCobro){ ganancia+=precio; }
+      historial.push({fecha:f+" "+hora,servicio:s,nombre:n,precio:precio,costo:0,ganancia:sinCobro?0:precio,extras:extras,senia:se,sinCobro:sinCobro});
+      showToast(sinCobro?"🎁 Turno sin cobro registrado: "+n:"📋 Turno pasado registrado: "+n);
     }
   } else {
     // Turno futuro/hoy: chequeo de superposición
@@ -2817,11 +2851,12 @@ function marcarRealizado(i){
   var nombre=turnos[i].nombre;
   turnos[i].realizado=true;
   var p=turnos[i].precio||0,se=turnos[i].senia||0;
-  ganancia+=p;
+  var sinCobro=!!turnos[i].sinCobro;
+  if(!sinCobro){ ganancia+=p; }
   var now=new Date();
   var dd=pad(now.getDate()),mm=pad(now.getMonth()+1),yyyy=now.getFullYear();
   var fecha=yyyy+"-"+mm+"-"+dd+" "+pad(now.getHours())+":"+pad(now.getMinutes());
-  historial.push({fecha:fecha,servicio:turnos[i].servicio,nombre:nombre,precio:p,costo:0,ganancia:p,extras:turnos[i].extras||[],senia:se});
+  historial.push({fecha:fecha,servicio:turnos[i].servicio,nombre:nombre,precio:p,costo:0,ganancia:sinCobro?0:p,extras:turnos[i].extras||[],senia:se,sinCobro:sinCobro});
   // Asegurar que la clienta existe
   if(!Array.isArray(clientas)) clientas=[];
   var nLow=nombre.trim().toLowerCase();
@@ -2832,7 +2867,11 @@ function marcarRealizado(i){
   lsSave("clientas",clientas);
   descontarConsumiblesPorServicio();
   guardar();mostrar();renderSemana();renderTurnos();renderHistorial();renderStats();
-  showToast(se>0?"✅ +"+fmt(p)+" (Seña: "+fmt(se)+" · Resto: "+fmt(p-se)+") 🎉":"✅ +"+fmt(p)+" sumado! 🎉");
+  if(sinCobro){
+    showToast("🎁 Servicio sin cobro registrado · "+nombre);
+  } else {
+    showToast(se>0?"✅ +"+fmt(p)+" (Seña: "+fmt(se)+" · Resto: "+fmt(p-se)+") 🎉":"✅ +"+fmt(p)+" sumado! 🎉");
+  }
 }
 function eliminarTurno(i){turnos.splice(i,1);guardar();mostrar();renderSemana();renderTurnos();showToast("🗑 Eliminado");}
 
